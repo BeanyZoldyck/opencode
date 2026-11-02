@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { openUrl } from "./open.js"
+import path from "node:path"
+import { pathToFileURL } from "node:url"
+import { openHref, openUrl, resolveOpenTarget } from "./open.js"
 
 describe("openUrl", () => {
   test("rejects values that are not URLs", async () => {
@@ -12,5 +14,49 @@ describe("openUrl", () => {
     await expect(openUrl("javascript:alert(1)")).rejects.toThrow("Only http and https links")
     await expect(openUrl("ms-msdt:/id PCWDiagnostic")).rejects.toThrow("Only http and https links")
     await expect(openUrl("\\\\server\\share\\file.html")).rejects.toThrow("Only http and https links")
+  })
+})
+
+describe("resolveOpenTarget", () => {
+  test("keeps http and https URLs for the browser", () => {
+    expect(resolveOpenTarget("https://example.com/docs")).toBe("https://example.com/docs")
+    expect(resolveOpenTarget("http://127.0.0.1:4096")).toBe("http://127.0.0.1:4096/")
+  })
+
+  test("maps local file URLs and absolute paths to filesystem paths", () => {
+    const file = path.join(path.resolve("/tmp"), "example.md")
+    expect(resolveOpenTarget(pathToFileURL(file).href)).toBe(file)
+    expect(resolveOpenTarget(file)).toBe(file)
+  })
+
+  test("decodes percent-escaped absolute hrefs and drops fragments", () => {
+    expect(resolveOpenTarget("/tmp/mobile%20menu.png")).toBe("/tmp/mobile menu.png")
+    expect(resolveOpenTarget("/tmp/mobile%20menu.png#preview")).toBe("/tmp/mobile menu.png")
+    expect(resolveOpenTarget("/tmp/plan.md#section")).toBe("/tmp/plan.md")
+  })
+
+  test("keeps Windows drive-qualified paths in either slash style", () => {
+    expect(resolveOpenTarget("C:\\Users\\foo\\file.md")).toBe("C:\\Users\\foo\\file.md")
+    expect(resolveOpenTarget("d:/repo/plan.md")).toBe("d:/repo/plan.md")
+  })
+
+  test("resolves relative paths against a session directory base", () => {
+    const base = path.resolve("/repo")
+    expect(resolveOpenTarget("plan/example.md", base)).toBe(path.join(base, "plan/example.md"))
+    expect(resolveOpenTarget("./src/foo.ts", base)).toBe(path.join(base, "src/foo.ts"))
+    expect(resolveOpenTarget("../sibling.md", base)).toBe(path.resolve(base, "../sibling.md"))
+  })
+
+  test("rejects remote file URLs, anchors, and unsafe schemes", () => {
+    expect(resolveOpenTarget("file://example.com/share/index.html")).toBeUndefined()
+    expect(resolveOpenTarget("javascript:alert(1)")).toBeUndefined()
+    expect(resolveOpenTarget("#section", "/repo")).toBeUndefined()
+    expect(resolveOpenTarget("packages/tui/src/ui/link.tsx")).toBeUndefined()
+  })
+})
+
+describe("openHref", () => {
+  test("rejects schemes the OS handler would not treat as local files", async () => {
+    await expect(openHref("javascript:alert(1)")).rejects.toThrow("local file links")
   })
 })
